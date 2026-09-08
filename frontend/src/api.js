@@ -1,4 +1,12 @@
+import {
+  getFilteredAccommodations,
+  getFilteredTouristPlaces,
+  getFilteredRegionalFoods,
+  generateBudgetItineraryData
+} from './data/cityData';
+
 const API_BASE = '/api';
+
 
 export async function checkFare(params) {
   try {
@@ -461,10 +469,12 @@ export async function getBudgetItinerary(startingLocation = "Visakhapatnam Railw
   try {
     const res = await fetch(`${API_BASE}/tourist-places/itinerary?startingLocation=${encodeURIComponent(startingLocation)}&hours=${hours}&budget=${budget}&city=${encodeURIComponent(city)}`);
     if (!res.ok) throw new Error('Network error');
-    return await res.json();
+    const data = await res.json();
+    if (data && data.stops && data.stops.length > 0) return data;
   } catch (err) {
-    return null;
+    // Fallback to rich multi-city budget itinerary
   }
+  return generateBudgetItineraryData(startingLocation, hours, budget, city);
 }
 
 export async function getNearbyTransport(lat, lng) {
@@ -486,51 +496,14 @@ export async function getTouristPlaces(city = "Visakhapatnam") {
   try {
     const res = await fetch(`${API_BASE}/tourist-places/nearby?city=${encodeURIComponent(city)}`);
     if (!res.ok) throw new Error('Network response was not ok');
-    return await res.json();
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) return data;
   } catch (err) {
-    return [
-      {
-        id: 1,
-        name: "INS Kursura Submarine Museum",
-        city: "Visakhapatnam",
-        description: "India's iconic Soviet-built submarine converted into a walkthrough maritime museum on the golden sands of RK Beach.",
-        history: "Decommissioned in 2001 after 31 years of naval service including the 1971 war.",
-        entryFee: 70,
-        estimatedVisitTimeMin: 60,
-        category: "MUSEUM",
-        imageUrl: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=800",
-        famousFor: "Historic Submarine Interior, Torpedo room, Radar deck",
-        bestTime: "02:00 PM – 08:30 PM (Closed Mondays)"
-      },
-      {
-        id: 2,
-        name: "Kailasagiri Hilltop Park",
-        city: "Visakhapatnam",
-        description: "A 360-degree picturesque hill station overlooking the Bay of Bengal with massive 40-ft Lord Shiva and Parvati statues and ropeway ride.",
-        history: "Developed by VUDA as a serene scenic promenade offering a panoramic view of Vizag city coastline.",
-        entryFee: 20,
-        estimatedVisitTimeMin: 90,
-        category: "NATURE",
-        imageUrl: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800",
-        famousFor: "Ropeway cable car, Toy train ride, Titanic viewpoint",
-        bestTime: "06:00 AM – 08:00 PM Daily"
-      },
-      {
-        id: 3,
-        name: "Ramakrishna (RK) Beach & War Memorial",
-        city: "Visakhapatnam",
-        description: "The beating heart of Vizag beachfront with scenic promenade, Victory at Sea memorial, and bustling local Andhra street food stalls.",
-        history: "Famous for the Victory at Sea memorial commemorating naval victory in 1971.",
-        entryFee: 0,
-        estimatedVisitTimeMin: 75,
-        category: "BEACH",
-        imageUrl: "https://images.unsplash.com/photo-1519046904884-53103b34b206?w=800",
-        famousFor: "Seaside sunrise, Muri mixture snack, Breezy walkways",
-        bestTime: "All day (Best in Morning & Evening)"
-      }
-    ];
+    // Fallback to rich multi-city tourist places
   }
+  return getFilteredTouristPlaces(city);
 }
+
 
 export async function sendAIChat(params) {
   try {
@@ -656,10 +629,12 @@ export async function getAccommodations(city = 'Visakhapatnam', type, maxPrice) 
     if (maxPrice) url += `&maxPrice=${maxPrice}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('Network error');
-    return await res.json();
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) return data;
   } catch (err) {
-    return [];
+    // Proceed to rich verified fallback
   }
+  return getFilteredAccommodations(city, type, maxPrice);
 }
 
 export async function getRegionalFoods(city = 'Visakhapatnam', maxPrice, budgetOnly = false) {
@@ -668,11 +643,14 @@ export async function getRegionalFoods(city = 'Visakhapatnam', maxPrice, budgetO
     if (maxPrice) url += `&maxPrice=${maxPrice}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('Network error');
-    return await res.json();
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) return data;
   } catch (err) {
-    return [];
+    // Proceed to rich verified fallback
   }
+  return getFilteredRegionalFoods(city, maxPrice);
 }
+
 
 export async function getTransitHubs(city = 'Visakhapatnam') {
   try {

@@ -28,24 +28,29 @@ export default function App() {
   const [showScenariosModal, setShowScenariosModal] = useState(false);
   const [showSosModal, setShowSosModal] = useState(false);
 
-  // Live real-time location state (Continuously updated by real-time GPS ~3m)
+  // Live real-time location state (Initialized in detecting mode, then locked by device GPS / IP)
   const [location, setLocation] = useState({
-    name: "Visakhapatnam Railway Station",
-    city: "Visakhapatnam",
-    address: "Station Rd, Railway Quarters, Visakhapatnam, AP 530004",
-    lat: 17.7214,
-    lng: 83.2929,
-    accuracy: 3,
-    isGpsDetected: true
+    name: "Acquiring Live GPS...",
+    city: "Detecting City...",
+    address: "Locking onto your physical device location...",
+    lat: null,
+    lng: null,
+    accuracy: null,
+    isGpsDetected: false,
+    isLocating: true
   });
+
+  const [exploredCity, setExploredCity] = useState(null);
 
   // Continuous real-time high-accuracy GPS tracking (~3m precision)
   const { startTracking, errorMsg: gpsError } = useRealtimeLocation((newLoc) => {
     setLocation((prev) => ({
       ...prev,
-      ...newLoc
+      ...newLoc,
+      isLocating: false
     }));
   });
+
 
   const [destinationName, setDestinationName] = useState("");
   const [destinationCoords, setDestinationCoords] = useState(null);
@@ -75,8 +80,12 @@ export default function App() {
   };
 
   const handleExploreCity = (city) => {
+    if (city && city !== "Detecting City..." && city !== "Current Location") {
+      setExploredCity(city);
+    }
     setActiveTab('explore');
   };
+
 
   const handleSelectScenario = (sc) => {
     setLocation({
@@ -204,7 +213,8 @@ export default function App() {
             />
 
             {/* Verified Backpacker Stays & Regional Food Radar */}
-            <StayAndFoodExplorer currentCity={location.city || "Visakhapatnam"} />
+            <StayAndFoodExplorer currentCity={location.city && location.city !== "Detecting City..." ? location.city : "Visakhapatnam"} />
+
 
             {/* Nearby Restaurants Preview */}
             <NearbyRestaurants
@@ -303,11 +313,12 @@ export default function App() {
         {/* Tab 6: EXPLORE SIGHTS, STAYS & FOOD */}
         {activeTab === 'explore' && (
           <div className="space-y-6">
-            <StayAndFoodExplorer currentCity={location.city || "Visakhapatnam"} />
+            <StayAndFoodExplorer currentCity={exploredCity || (location.city && location.city !== "Detecting City..." ? location.city : "Visakhapatnam")} />
 
             <ExploreWithMe
               currentLang={currentLang}
               originLocation={location}
+              initialCity={exploredCity || (location.city && location.city !== "Detecting City..." ? location.city : "Visakhapatnam")}
               onSelectAttraction={(name) => {
                 setDestinationName(name);
                 setActiveTab('plan');
@@ -315,6 +326,7 @@ export default function App() {
             />
           </div>
         )}
+
 
         {/* Tab 7: NEARBY RESTAURANTS */}
         {activeTab === 'restaurants' && (

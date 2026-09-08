@@ -279,44 +279,80 @@ export async function reverseGeocode(lat, lng) {
 
     return new Promise((resolve) => {
       geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-        if (status !== google.maps.GeocoderStatus.OK || !results || !results[0]) {
-          resolve(null);
+        if (status === google.maps.GeocoderStatus.OK && results && results[0]) {
+          const res = results[0];
+          let city = "Current Location";
+          let landmark = res.formatted_address.split(',')[0];
+
+          if (res.address_components) {
+            for (const comp of res.address_components) {
+              if (comp.types.includes('locality')) {
+                city = comp.long_name;
+                break;
+              } else if (comp.types.includes('sublocality') && city === "Current Location") {
+                city = comp.long_name;
+              } else if (comp.types.includes('administrative_area_level_2')) {
+                city = comp.long_name;
+              } else if (comp.types.includes('administrative_area_level_1')) {
+                city = comp.long_name;
+              }
+            }
+          }
+
+          resolve({
+            name: landmark,
+            address: res.formatted_address,
+            city: city,
+            lat: lat,
+            lng: lng
+          });
           return;
         }
 
-        const res = results[0];
-        let city = "Current Location";
-        let landmark = res.formatted_address.split(',')[0];
-
-        if (res.address_components) {
-          for (const comp of res.address_components) {
-            if (comp.types.includes('locality')) {
-              city = comp.long_name;
-              break;
-            } else if (comp.types.includes('sublocality') && city === "Current Location") {
-              city = comp.long_name;
-            } else if (comp.types.includes('administrative_area_level_2')) {
-              city = comp.long_name;
-            } else if (comp.types.includes('administrative_area_level_1')) {
-              city = comp.long_name;
+        // Fallback to OpenStreetMap Nominatim reverse geocoder
+        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`)
+          .then(r => r.json())
+          .then(data => {
+            if (data && data.address) {
+              const city = data.address.city || data.address.town || data.address.suburb || data.address.state_district || "Current Location";
+              const landmark = data.address.road || data.address.suburb || data.display_name.split(',')[0];
+              resolve({
+                name: landmark,
+                address: data.display_name,
+                city: city,
+                lat: lat,
+                lng: lng
+              });
+            } else {
+              resolve(null);
             }
-          }
-        }
-
-        resolve({
-          name: landmark,
-          address: res.formatted_address,
-          city: city,
-          lat: lat,
-          lng: lng
-        });
+          })
+          .catch(() => resolve(null));
       });
     });
   } catch (err) {
-    console.warn("Google Reverse Geocode error:", err);
+    console.warn("Google Reverse Geocode fallback to OSM:", err);
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
+      const data = await res.json();
+      if (data && data.address) {
+        const city = data.address.city || data.address.town || data.address.suburb || "Current Location";
+        const landmark = data.address.road || data.display_name.split(',')[0];
+        return {
+          name: landmark,
+          address: data.display_name,
+          city: city,
+          lat: lat,
+          lng: lng
+        };
+      }
+    } catch (e) {
+      // ignore
+    }
     return null;
   }
 }
+
 
 /**
  * Google Routes API / DirectionsService: Calculate road route, distance, duration, and turn steps

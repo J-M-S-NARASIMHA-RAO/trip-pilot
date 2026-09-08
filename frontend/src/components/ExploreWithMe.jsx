@@ -7,15 +7,16 @@ import {
 import { translations } from '../translations';
 import { getTouristPlaces, getBudgetItinerary } from '../api';
 
-export default function ExploreWithMe({ currentLang, originLocation, onSelectAttraction }) {
+export default function ExploreWithMe({ currentLang, originLocation, onSelectAttraction, initialCity }) {
   const t = translations[currentLang] || translations.en;
   
   // Requirement 6: Explore place based on 2 options:
   // Option 1: Current location
   // Option 2: Selective option (other city search)
   const [exploreMode, setExploreMode] = useState("CURRENT"); // "CURRENT" or "SELECTIVE"
-  const [selectiveCity, setSelectiveCity] = useState("Hyderabad");
+  const [selectiveCity, setSelectiveCity] = useState(initialCity || "Bengaluru");
   const [customCityInput, setCustomCityInput] = useState("");
+  const [placeFilter, setPlaceFilter] = useState("ALL"); // ALL, FREE, UNDER50, HERITAGE, NATURE
   
   // Custom Budget input
   const [itineraryBudget, setItineraryBudget] = useState(500);
@@ -23,17 +24,24 @@ export default function ExploreWithMe({ currentLang, originLocation, onSelectAtt
   const [itineraryData, setItineraryData] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    if (initialCity && initialCity !== "Detecting City..." && initialCity !== "Current Location") {
+      setSelectiveCity(initialCity);
+    }
+  }, [initialCity]);
+
   const POPULAR_CITIES = [
-    "Visakhapatnam", "Hyderabad", "Bengaluru", "Vijayawada", "Delhi", "Mumbai", "Srikakulam", "Jaipur"
+    "Visakhapatnam", "Bengaluru", "Hyderabad", "Vijayawada", "Delhi", "Mumbai", "Jaipur", "Goa"
   ];
 
   const activeCity = exploreMode === "CURRENT" 
-    ? ((originLocation?.city && originLocation.city !== "Locating...") ? originLocation.city : "Visakhapatnam") 
-    : (selectiveCity || "Visakhapatnam");
+    ? ((originLocation?.city && originLocation.city !== "Detecting City..." && originLocation.city !== "Current Location") ? originLocation.city : (initialCity || "Visakhapatnam")) 
+    : (selectiveCity || initialCity || "Visakhapatnam");
 
   const startingPoint = exploreMode === "CURRENT"
-    ? (originLocation?.name || "Current GPS Location")
+    ? (originLocation?.name || `${activeCity} Live GPS Location`)
     : `${activeCity} Central Hub`;
+
 
   useEffect(() => {
     setLoading(true);
@@ -309,41 +317,82 @@ export default function ExploreWithMe({ currentLang, originLocation, onSelectAtt
 
       {/* Featured Attractions Grid */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-black uppercase tracking-wider text-slate-700">
-            Featured {activeCity} Attractions
-          </h3>
-          <span className="text-xs text-slate-500 font-medium">
-            Showing {places.length} top spots
-          </span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base sm:text-lg font-black tracking-tight text-slate-900">
+              🏛️ Famous Sights & Places in {activeCity}
+            </h3>
+            <p className="text-xs text-slate-500">
+              Curated iconic landmarks, ticket pricing, and visitor information for your trip
+            </p>
+          </div>
+
+          {/* Attraction Filter Chips */}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            {[
+              { id: 'ALL', label: 'All Spots' },
+              { id: 'FREE', label: 'Free Entry (₹0)' },
+              { id: 'UNDER50', label: '≤ ₹50' },
+              { id: 'HERITAGE', label: 'Heritage & Museums' },
+              { id: 'NATURE', label: 'Parks & Beaches' }
+            ].map(f => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setPlaceFilter(f.id)}
+                className={`px-3 py-1 rounded-xl font-bold transition-all text-xs ${
+                  placeFilter === f.id
+                    ? 'bg-teal-700 text-white shadow-xs'
+                    : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {places.map((place) => (
+          {places
+            .filter(place => {
+              if (placeFilter === 'FREE') return (place.entryFee === 0 || !place.entryFee);
+              if (placeFilter === 'UNDER50') return (place.entryFee <= 50);
+              if (placeFilter === 'HERITAGE') return (place.category === 'HERITAGE' || place.category === 'MUSEUM');
+              if (placeFilter === 'NATURE') return (place.category === 'NATURE' || place.category === 'BEACH' || place.category === 'PARK' || place.category === 'LAKE');
+              return true;
+            })
+            .map((place) => (
             <div
               key={place.id || place.name}
               className="bg-white rounded-3xl border border-slate-200 shadow-md overflow-hidden hover:shadow-xl transition-all flex flex-col justify-between"
             >
               <div>
-                <div className="relative h-44 overflow-hidden">
+                <div className="relative h-48 overflow-hidden bg-slate-100">
                   <img
                     src={place.imageUrl || "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=800"}
                     alt={place.name}
                     className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
+                    onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=800'; }}
                   />
                   <span className="absolute top-3 left-3 bg-slate-900/80 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg">
                     {place.category}
                   </span>
-                  <span className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-md text-slate-900 text-xs font-black px-2.5 py-1 rounded-lg shadow-sm">
+                  <span className="absolute bottom-3 right-3 bg-white/95 backdrop-blur-md text-slate-900 text-xs font-black px-2.5 py-1 rounded-xl shadow-md border border-slate-200">
                     {place.entryFee > 0 ? `Entry: ₹${place.entryFee}` : 'Free Entry'}
                   </span>
                 </div>
 
                 <div className="p-4 space-y-2">
-                  <h4 className="text-base font-black text-slate-900">{place.name}</h4>
+                  <h4 className="text-base font-black text-slate-900 leading-snug">{place.name}</h4>
                   <p className="text-xs text-slate-600 leading-relaxed line-clamp-3">
                     {place.description}
                   </p>
+
+                  {place.famousFor && (
+                    <p className="text-[11px] text-teal-700 font-semibold bg-teal-50 px-2.5 py-1 rounded-lg border border-teal-200 line-clamp-1">
+                      ⭐ {place.famousFor}
+                    </p>
+                  )}
                   
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
                     <span className="flex items-center gap-1 font-medium">
@@ -356,12 +405,23 @@ export default function ExploreWithMe({ currentLang, originLocation, onSelectAtt
                 </div>
               </div>
 
-              <div className="p-4 pt-0">
+              <div className="p-4 pt-0 grid grid-cols-2 gap-2">
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + ' ' + activeCity)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-1 text-center"
+                >
+                  <span>Directions</span>
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+
                 <button
                   onClick={() => onSelectAttraction && onSelectAttraction(place.name)}
-                  className="w-full bg-slate-100 hover:bg-teal-600 hover:text-white text-slate-800 font-bold text-xs py-2 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer"
+                  className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs py-2.5 rounded-xl transition-all flex items-center justify-center gap-1 shadow-sm cursor-pointer"
                 >
-                  Plan Ride to Here <ArrowRight className="h-3.5 w-3.5" />
+                  <span>Plan Ride</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
                 </button>
               </div>
 
@@ -369,6 +429,7 @@ export default function ExploreWithMe({ currentLang, originLocation, onSelectAtt
           ))}
         </div>
       </div>
+
 
     </div>
   );

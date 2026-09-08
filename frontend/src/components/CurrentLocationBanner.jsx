@@ -91,15 +91,27 @@ export default function CurrentLocationBanner({
         {/* Location Information with Real-time ~3m GPS Badge */}
         <div className="space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-black tracking-wide uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              Real-Time GPS Live
-            </span>
+            {location.isLocating ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-black tracking-wide uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm animate-pulse">
+                <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                Acquiring Live GPS...
+              </span>
+            ) : location.isGpsDetected ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-black tracking-wide uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                Real-Time GPS Live
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-black tracking-wide uppercase bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm">
+                <Navigation className="w-3 h-3 text-sky-400" />
+                Network / City Detected
+              </span>
+            )}
             
-            {/* ~3m Accuracy Indicator */}
+            {/* Precision Indicator */}
             <span className="inline-flex items-center gap-1 text-[11px] font-bold text-teal-300 bg-teal-500/15 px-2 py-0.5 rounded-md border border-teal-500/30">
               <Crosshair className="h-3 w-3 text-teal-400 animate-pulse" />
-              <span>±{location.accuracy || accuracy || 3}m Precision</span>
+              <span>±{location.accuracy ? Math.round(location.accuracy) : 3}m Precision</span>
             </span>
 
             {location.lat && (
@@ -113,18 +125,21 @@ export default function CurrentLocationBanner({
             <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
               {location.name}
             </h2>
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-white/10 text-slate-300">
-              {location.city}
-            </span>
+            {location.city && (
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-white/10 text-slate-300">
+                {location.city}
+              </span>
+            )}
           </div>
 
           <p className="text-xs text-slate-400 max-w-xl line-clamp-1">
-            {location.address || "Station Road, Visakhapatnam, Andhra Pradesh 530004"}
+            {location.address || "Detecting address from live GPS satellite signals..."}
           </p>
 
           {gpsError && (
-            <p className="text-[11px] text-amber-300 font-medium">
-              ⚠️ {gpsError}
+            <p className="text-[11px] text-amber-300 font-medium flex items-center gap-1.5 bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-500/30">
+              <span>⚠️</span>
+              <span>{gpsError}</span>
             </p>
           )}
         </div>
@@ -137,7 +152,7 @@ export default function CurrentLocationBanner({
             title="Lock onto real-time GPS position with ~3m precision"
           >
             <Radio className="h-4 w-4 animate-pulse text-slate-950" />
-            <span>Lock GPS (±3m)</span>
+            <span>{location.isGpsDetected ? "Re-Lock GPS (±3m)" : "Detect My Live GPS"}</span>
           </button>
 
           <button
@@ -158,21 +173,22 @@ export default function CurrentLocationBanner({
           </div>
           <div>
             <h4 className="text-xs font-black text-white tracking-wide">
-              📍 Current City: {location.city || "Visakhapatnam"}
+              📍 Current City: {location.city && location.city !== "Detecting City..." ? location.city : "Visakhapatnam"}
             </h4>
             <p className="text-[11px] text-teal-200">
-              Discover top tourist sights, budget itineraries, and local food spots in {location.city}.
+              Discover top tourist sights, budget itineraries, and local food spots in {location.city && location.city !== "Detecting City..." ? location.city : "Visakhapatnam"}.
             </p>
           </div>
         </div>
 
         <button
-          onClick={() => onExploreCity && onExploreCity(location.city)}
+          onClick={() => onExploreCity && onExploreCity(location.city && location.city !== "Detecting City..." ? location.city : "Visakhapatnam")}
           className="self-start sm:self-auto bg-white hover:bg-teal-50 text-slate-900 font-extrabold text-xs px-4 py-2 rounded-xl transition-all shadow-sm flex items-center gap-1.5 active:scale-95 shrink-0"
         >
-          <span>Explore {location.city || "Vizag"}</span>
+          <span>Explore {location.city && location.city !== "Detecting City..." ? location.city : "City"}</span>
           <ArrowRight className="h-3.5 w-3.5 text-teal-600" />
         </button>
+
       </div>
 
       {/* Manual Location Dropdown & Google Places Autocomplete */}
