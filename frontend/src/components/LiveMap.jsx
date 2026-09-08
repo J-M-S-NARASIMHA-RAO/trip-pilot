@@ -584,22 +584,6 @@ export default function LiveMap({
           </div>
         </div>
 
-        {/* Floating Destination Photo Preview HUD */}
-        {destPhoto && destinationName && destinationName !== "Select your destination" && (
-          <div className="absolute top-3 right-3 z-20 bg-white/95 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200/80 shadow-lg flex items-center gap-2 max-w-[240px] animate-in fade-in slide-in-from-top-2 duration-300">
-            <img
-              src={destPhoto}
-              alt={destinationName}
-              className="w-10 h-10 rounded-xl object-cover border border-rose-200 shrink-0 shadow-xs"
-              onError={(e) => { e.target.style.display = 'none'; }}
-            />
-            <div className="min-w-0 pr-1.5">
-              <span className="text-[9px] font-black uppercase tracking-wider text-rose-600 block">Target Spot</span>
-              <p className="text-[11px] font-bold text-slate-900 truncate">{destinationName}</p>
-            </div>
-          </div>
-        )}
-
         {/* Floating Map Legend Overlay */}
         <div className="absolute bottom-3 left-3 z-20 bg-white/95 backdrop-blur-md px-3.5 py-2.5 rounded-2xl border border-slate-200/80 shadow-lg text-[11px] flex flex-wrap items-center gap-2.5 max-w-[90%]">
           <span className="flex items-center gap-1.5 font-bold text-sky-700">
