@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ShieldAlert, ShieldCheck, AlertTriangle, ArrowRight, CheckCircle2, 
   HelpCircle, ChevronDown, ChevronUp, DollarSign, Bus, Car, Footprints, 
   TrendingUp, Sparkles, Navigation, Plus, Trash2, ExternalLink, Copy, Check,
-  Search, Loader2, QrCode, GraduationCap, MapPin, Flag, Clock 
+  Search, Loader2, QrCode, GraduationCap, MapPin, Flag, Clock, X
 } from 'lucide-react';
 import { translations } from '../translations';
 import { checkFare, getRapidoAndUberUrls, getLiveTaxiRates } from '../api';
@@ -12,6 +12,7 @@ import { saveLocalScamReport } from '../services/safetyService';
 import speechService from '../services/speechService';
 import BusTransitGuide from './BusTransitGuide';
 import ProviderComparisonTable from './ProviderComparisonTable';
+import { getPopularDestinationsForCity, searchLocalDestinations } from '../data/destinationSuggestions';
 
 export default function FareCheckerWidget({ 
   currentLang, 
@@ -40,9 +41,61 @@ export default function FareCheckerWidget({
   };
 
   // Autocomplete state for destination
-  const [destSearch, setDestSearch] = useState("");
+  const [destSearch, setDestSearch] = useState(destination || "");
   const [searching, setSearching] = useState(false);
   const [destPredictions, setDestPredictions] = useState([]);
+
+  // Spotlight photo, rating & address state (prevents ReferenceErrors)
+  const [destinationPhoto, setDestinationPhoto] = useState(null);
+  const [destRating, setDestRating] = useState(null);
+  const [destAddress, setDestAddress] = useState("");
+
+  // Live Location & Popular relative destinations calculation (Memoized)
+  const liveCity = originLocation?.city && originLocation.city !== "Detecting City..." ? originLocation.city : "Visakhapatnam";
+  const liveLat = originLocation?.lat || null;
+  const liveLng = originLocation?.lng || null;
+
+  const popularLiveDestinations = useMemo(() => {
+    const coords = liveLat && liveLng ? { lat: liveLat, lng: liveLng } : null;
+    return getPopularDestinationsForCity(liveCity, coords);
+  }, [liveCity, liveLat, liveLng]);
+
+  // Sync destSearch if parent destination prop changes (e.g., scenario clicked)
+  useEffect(() => {
+    if (propDestination !== undefined && propDestination !== destSearch) {
+      setDestSearch(propDestination);
+    }
+  }, [propDestination]);
+
+  // Handle selecting any suggested destination (from quick tray or dropdown)
+  const handleSelectSuggestedDestination = (dest) => {
+    const relativeName = dest.relativeName || `${dest.name}, ${dest.city}`;
+    const coords = { lat: dest.lat, lng: dest.lng };
+
+    setDestSearch(relativeName);
+    setDestination(relativeName, coords);
+    setDestinationPhoto(dest.imageUrl || null);
+    setDestRating(dest.rating || null);
+    setDestAddress(dest.address || `${dest.name}, ${dest.city}, India`);
+    setDestPredictions([]);
+
+    if (onDestinationChange) {
+      onDestinationChange(relativeName, coords);
+    }
+  };
+
+  // Clear destination field
+  const handleClearDestination = () => {
+    setDestSearch("");
+    setDestination("", null);
+    setDestinationPhoto(null);
+    setDestRating(null);
+    setDestAddress("");
+    setDestPredictions([]);
+    if (onDestinationChange) {
+      onDestinationChange("", null);
+    }
+  };
 
   // Multi-stop ride feature
   const [localStops, setLocalStops] = useState([]);
@@ -84,50 +137,84 @@ export default function FareCheckerWidget({
   const [scamVehicleReg, setScamVehicleReg] = useState("");
   const [reportSuccessToast, setReportSuccessToast] = useState(false);
 
-  // Google Places search for Destination
+  // Hybrid Autocomplete search for Destination (Local Registry + Google Places)
   useEffect(() => {
-    if (!destSearch || destSearch.trim().length < 2) {
+    if (!destSearch || destSearch.trim().length < 1) {
       setDestPredictions([]);
       return;
     }
 
-    const timer = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const results = await searchPlaces(destSearch, {
-          lat: originLocation?.lat || 17.7214,
-          lng: originLocation?.lng || 83.2929
-        });
-        setDestPredictions(results);
-      } catch (e) {
-        console.warn("Places search error:", e);
-      } finally {
-        setSearching(false);
-      }
-    }, 280);
+    // 1. Instant local matching suggestions
+    const coords = liveLat && liveLng ? { lat: liveLat, lng: liveLng } : null;
+    const localMatches = searchLocalDestinations(destSearch, liveCity, coords);
+    const formattedLocal = localMatches.slice(0, 6).map(item => ({
+      placeId: item.id,
+      mainText: item.name,
+      secondaryText: item.relativeName + (item.distanceKm ? ` • ${item.distanceKm} km away` : ` • ${item.city}`),
+      fullItem: item,
+      isLocal: true
+    }));
+    setDestPredictions(formattedLocal);
 
-    return () => clearTimeout(timer);
-  }, [destSearch, originLocation]);
+    // 2. Also query Google Places if online and query >= 2 chars
+    if (destSearch.trim().length >= 2) {
+      const timer = setTimeout(async () => {
+        setSearching(true);
+        try {
+          const results = await searchPlaces(destSearch, {
+            lat: liveLat || 17.7214,
+            lng: liveLng || 83.2929
+          });
+          if (results && results.length > 0) {
+            setDestPredictions(prev => {
+              const existingTexts = new Set(prev.map(p => p.mainText.toLowerCase()));
+              const filteredGoogle = results.filter(r => !existingTexts.has(r.mainText.toLowerCase()));
+              return [...prev, ...filteredGoogle].slice(0, 8);
+            });
+          }
+        } catch (e) {
+          console.warn("Places search error:", e);
+        } finally {
+          setSearching(false);
+        }
+      }, 300);
+
+      return () => clearTimeout(timer);
+    }
+  }, [destSearch, liveCity, liveLat, liveLng]);
 
   const handleSelectDestPrediction = async (p) => {
+    if (p.fullItem) {
+      handleSelectSuggestedDestination(p.fullItem);
+      return;
+    }
+
     setSearching(true);
     try {
       const details = await getPlaceDetails(p.placeId);
       if (details) {
-        setDestination(details.name);
-        setDestCoords({ lat: details.lat, lng: details.lng });
+        const destName = details.name;
+        const coords = { lat: details.lat, lng: details.lng };
+        setDestSearch(destName);
+        setDestination(destName, coords);
+        if (details.photos && details.photos.length > 0) {
+          setDestinationPhoto(details.photos[0]);
+        }
+        if (details.rating) setDestRating(details.rating);
+        if (details.address) setDestAddress(details.address);
         if (onDestinationChange) {
-          onDestinationChange(details.name, { lat: details.lat, lng: details.lng });
+          onDestinationChange(destName, coords);
         }
       } else {
+        setDestSearch(p.mainText);
         setDestination(p.mainText);
         if (onDestinationChange) {
           onDestinationChange(p.mainText, null);
         }
       }
-      setDestSearch("");
       setDestPredictions([]);
     } catch (e) {
+      setDestSearch(p.mainText);
       setDestination(p.mainText);
       setDestPredictions([]);
     } finally {
@@ -446,7 +533,7 @@ export default function FareCheckerWidget({
       <div className="p-5 sm:p-6 bg-slate-50/50 border-b border-slate-200">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           
-          {/* DESTINATION INPUT WITH GOOGLE PLACES AUTOCOMPLETE */}
+          {/* DESTINATION INPUT WITH LIVE LOCATION-BASED SUGGESTIONS & AUTOCOMPLETE */}
           <div className="relative">
             <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
               <div className="flex items-center gap-2">
@@ -460,47 +547,138 @@ export default function FareCheckerWidget({
                   </span>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => setShowAddStop(!showAddStop)}
-                className="text-[11px] font-bold text-teal-700 hover:text-teal-900 flex items-center gap-1"
-                title="Add intermediate stop"
-              >
-                <Plus className="h-3.5 w-3.5" /> Stop
-              </button>
+              <div className="flex items-center gap-2">
+                {destination && (
+                  <button
+                    type="button"
+                    onClick={handleClearDestination}
+                    className="text-[11px] font-bold text-slate-500 hover:text-rose-600 flex items-center gap-0.5"
+                    title="Clear destination"
+                  >
+                    <X className="h-3 w-3" /> Clear
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowAddStop(!showAddStop)}
+                  className="text-[11px] font-bold text-teal-700 hover:text-teal-900 flex items-center gap-1"
+                  title="Add intermediate stop"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Stop
+                </button>
+              </div>
             </div>
 
             <div className="relative">
               <input
                 type="text"
-                value={destSearch || destination}
+                value={destSearch}
                 onChange={(e) => {
-                  setDestSearch(e.target.value);
-                  setDestination(e.target.value);
-                  if (onDestinationChange) onDestinationChange(e.target.value, null);
+                  const val = e.target.value;
+                  setDestSearch(val);
+                  setDestination(val);
+                  if (onDestinationChange) onDestinationChange(val, null);
                 }}
-                placeholder="Search destination across India (Google Places)..."
-                className="w-full bg-white border border-slate-300 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && destSearch && destSearch.trim()) {
+                    e.preventDefault();
+                    setDestPredictions([]);
+                    handleCheckFare();
+                  }
+                }}
+                placeholder={`Search destination in ${liveCity} or across India...`}
+                className="w-full bg-white border border-slate-300 rounded-2xl pl-3.5 pr-14 py-2.5 text-xs font-bold text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
-              {searching && (
-                <Loader2 className="absolute right-3 top-3 h-4 w-4 text-teal-600 animate-spin" />
-              )}
+              <div className="absolute right-2.5 top-2.5 flex items-center gap-1">
+                {destSearch && (
+                  <button
+                    type="button"
+                    onClick={handleClearDestination}
+                    className="p-1 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                    title="Clear destination"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {searching && (
+                  <Loader2 className="h-4 w-4 text-teal-600 animate-spin" />
+                )}
+              </div>
             </div>
 
-            {/* Google Places Predictions Dropdown */}
+            {/* LIVE LOCATION-AWARE POPULAR DESTINATIONS TRAY */}
+            <div className="mt-2.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                  <Sparkles className="h-3 w-3 text-amber-500 animate-pulse" />
+                  <span>Popular in <strong className="text-teal-700">{liveCity}</strong> (Click to auto-fill):</span>
+                </span>
+                <span className="text-[9px] text-slate-400 font-bold hidden sm:inline">
+                  📍 Real-time live GPS distance
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {popularLiveDestinations.slice(0, 8).map((dest) => {
+                  const isSelected = destination && (
+                    destination.toLowerCase().includes(dest.name.toLowerCase()) || 
+                    destination.toLowerCase().includes(dest.relativeName.toLowerCase())
+                  );
+                  return (
+                    <button
+                      key={dest.id}
+                      type="button"
+                      onClick={() => handleSelectSuggestedDestination(dest)}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all border shadow-xs ${
+                        isSelected
+                          ? 'bg-teal-600 text-white border-teal-600 shadow-sm scale-102'
+                          : 'bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-900 border-slate-200 hover:border-teal-300'
+                      }`}
+                      title={`${dest.relativeName} - ${dest.address}`}
+                    >
+                      <span className="text-xs">{dest.emoji}</span>
+                      <span>{dest.name.split('(')[0].trim()}</span>
+                      {dest.distanceKm !== null && (
+                        <span className={`text-[9px] font-extrabold px-1 py-0.2 rounded-md ${
+                          isSelected ? 'bg-teal-700 text-teal-100' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {dest.distanceKm}km
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Autocomplete Predictions Dropdown */}
             {destPredictions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-2xl border border-slate-200 shadow-2xl z-30 overflow-hidden divide-y divide-slate-100 max-h-56 overflow-y-auto">
-                {destPredictions.map((p) => (
+              <div className="absolute left-0 right-0 top-16 bg-white rounded-2xl border border-slate-200 shadow-2xl z-30 overflow-hidden divide-y divide-slate-100 max-h-60 overflow-y-auto">
+                <div className="p-2 bg-slate-50 text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                  <span>Relative Destinations matching "{destSearch}"</span>
+                  <span>{destPredictions.length} results</span>
+                </div>
+                {destPredictions.map((p, idx) => (
                   <button
-                    key={p.placeId}
+                    key={p.placeId || idx}
                     type="button"
                     onClick={() => handleSelectDestPrediction(p)}
-                    className="w-full text-left p-3 hover:bg-teal-50 transition-colors flex items-start gap-2.5 text-xs"
+                    className="w-full text-left p-3 hover:bg-teal-50 transition-colors flex items-start gap-2.5 text-xs group"
                   >
-                    <MapPin className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="text-slate-900 block font-bold">{p.mainText}</strong>
-                      <span className="text-[11px] text-slate-500">{p.secondaryText}</span>
+                    <span className="text-sm mt-0.5">{p.fullItem?.emoji || '📍'}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1">
+                        <strong className="text-slate-900 font-bold group-hover:text-teal-900 truncate">
+                          {p.mainText}
+                        </strong>
+                        {p.fullItem?.distanceKm !== undefined && p.fullItem?.distanceKm !== null && (
+                          <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-md shrink-0">
+                            {p.fullItem.distanceKm} km away
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-500 block truncate">
+                        {p.secondaryText}
+                      </span>
                     </div>
                   </button>
                 ))}
@@ -663,7 +841,14 @@ export default function FareCheckerWidget({
             {/* Real Location Photo */}
             <div className="relative w-full sm:w-44 h-32 sm:h-28 rounded-xl overflow-hidden shrink-0 bg-slate-950 border border-white/20 group">
               <img
-                src={destinationPhoto || "https://images.unsplash.com/photo-1477959858617-67f30bc75b82?w=800"}
+                src={
+                  destinationPhoto ||
+                  (popularLiveDestinations.find(d => 
+                    destination.toLowerCase().includes(d.name.toLowerCase()) || 
+                    destination.toLowerCase().includes(d.relativeName.toLowerCase())
+                  )?.imageUrl) ||
+                  "https://images.unsplash.com/photo-1477959858617-67f30bc75b82?w=800"
+                }
                 alt={destination}
                 className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                 onError={(e) => {
