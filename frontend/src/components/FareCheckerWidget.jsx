@@ -8,7 +8,6 @@ import {
 import { translations } from '../translations';
 import { checkFare, getRapidoAndUberUrls, getLiveTaxiRates } from '../api';
 import { searchPlaces, getPlaceDetails, calculateRoute } from '../services/googleMapsService';
-import { getLocationPhoto } from '../services/locationPhotoService';
 import { saveLocalScamReport } from '../services/safetyService';
 import speechService from '../services/speechService';
 import BusTransitGuide from './BusTransitGuide';
@@ -44,11 +43,6 @@ export default function FareCheckerWidget({
   const [destSearch, setDestSearch] = useState("");
   const [searching, setSearching] = useState(false);
   const [destPredictions, setDestPredictions] = useState([]);
-
-  // Real photo and metadata of the selected destination from Google
-  const [destinationPhoto, setDestinationPhoto] = useState(null);
-  const [destRating, setDestRating] = useState(null);
-  const [destAddress, setDestAddress] = useState(null);
 
   // Multi-stop ride feature
   const [localStops, setLocalStops] = useState([]);
@@ -115,51 +109,26 @@ export default function FareCheckerWidget({
     return () => clearTimeout(timer);
   }, [destSearch, originLocation]);
 
-  // Dynamically resolve real-world photo for any typed or selected destination
-  useEffect(() => {
-    if (!destination || destination.trim().length < 2) {
-      setDestinationPhoto(null);
-      return;
-    }
-
-    let isMounted = true;
-    getLocationPhoto(destination, null, originLocation?.city || "").then((photoUrl) => {
-      if (isMounted && photoUrl) {
-        setDestinationPhoto(photoUrl);
-      }
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [destination, originLocation]);
-
   const handleSelectDestPrediction = async (p) => {
     setSearching(true);
     try {
-      if (p.coords) {
-        setDestination(p.name, p.coords);
-        setDestAddress(p.displayName || p.secondaryText);
-      }
       const details = await getPlaceDetails(p.placeId);
       if (details) {
-        setDestination(details.name, { lat: details.lat, lng: details.lng });
-        if (details.photoUrl) setDestinationPhoto(details.photoUrl);
-        if (details.rating) setDestRating(details.rating);
-        if (details.address) setDestAddress(details.address);
+        setDestination(details.name);
+        setDestCoords({ lat: details.lat, lng: details.lng });
         if (onDestinationChange) {
           onDestinationChange(details.name, { lat: details.lat, lng: details.lng });
         }
       } else {
-        setDestination(p.mainText, p.coords || null);
+        setDestination(p.mainText);
         if (onDestinationChange) {
-          onDestinationChange(p.mainText, p.coords || null);
+          onDestinationChange(p.mainText, null);
         }
       }
       setDestSearch("");
       setDestPredictions([]);
     } catch (e) {
-      setDestination(p.mainText, p.coords || null);
+      setDestination(p.mainText);
       setDestPredictions([]);
     } finally {
       setSearching(false);

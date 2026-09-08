@@ -2,84 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { 
   Bus, Car, Footprints, Users, Wallet, Clock, ArrowRight, 
   Sparkles, CheckCircle2, ShieldCheck, Zap, Info, ChevronRight, 
-  Plus, Trash2, ExternalLink, MapPin, Loader2 
+  Plus, Trash2, ExternalLink 
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { translations } from '../translations';
 import { planTrip, getRapidoAndUberUrls } from '../api';
-import { searchPlaces, getPlaceDetails } from '../services/googleMapsService';
-import { getLocationPhoto } from '../services/locationPhotoService';
 
 export default function SmartMobilityPlanner({ currentLang, originLocation, userMode, onStartTrip }) {
   const t = translations[currentLang] || translations.en;
 
-  // Custom user-typed destination
+  // Custom user-typed destination (Requirement 2: only user selects destination)
   const [destination, setDestination] = useState("Vizag Complex");
-  const [destSearch, setDestSearch] = useState("");
-  const [destPredictions, setDestPredictions] = useState([]);
-  const [searchingDest, setSearchingDest] = useState(false);
-  const [destPhoto, setDestPhoto] = useState(null);
-
   // Multi-stop support (Requirement 3: like Rapido)
   const [stops, setStops] = useState([]);
   const [newStopInput, setNewStopInput] = useState("");
   const [showAddStop, setShowAddStop] = useState(false);
-
-  // Auto-fetch photo of destination
-  useEffect(() => {
-    if (!destination || destination.trim().length < 2) {
-      setDestPhoto(null);
-      return;
-    }
-    let isMounted = true;
-    getLocationPhoto(destination, null, originLocation?.city || "").then(photoUrl => {
-      if (isMounted && photoUrl) setDestPhoto(photoUrl);
-    });
-    return () => { isMounted = false; };
-  }, [destination, originLocation]);
-
-  // Autocomplete debounced search
-  useEffect(() => {
-    if (!destSearch || destSearch.trim().length < 2) {
-      setDestPredictions([]);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      setSearchingDest(true);
-      try {
-        const results = await searchPlaces(destSearch, {
-          lat: originLocation?.lat || 17.7214,
-          lng: originLocation?.lng || 83.2929
-        });
-        setDestPredictions(results);
-      } catch (err) {
-        setDestPredictions([]);
-      } finally {
-        setSearchingDest(false);
-      }
-    }, 280);
-    return () => clearTimeout(timer);
-  }, [destSearch, originLocation]);
-
-  const handleSelectPrediction = async (p) => {
-    setSearchingDest(true);
-    try {
-      const details = await getPlaceDetails(p.placeId);
-      if (details) {
-        setDestination(details.name);
-        if (details.photoUrl) setDestPhoto(details.photoUrl);
-      } else {
-        setDestination(p.mainText);
-      }
-      setDestSearch("");
-      setDestPredictions([]);
-    } catch (e) {
-      setDestination(p.mainText);
-      setDestPredictions([]);
-    } finally {
-      setSearchingDest(false);
-    }
-  };
 
   const [travelers, setTravelers] = useState(1);
   // Clean budget handling (Requirement 5: remove unnecessary 0)
@@ -210,16 +147,11 @@ export default function SmartMobilityPlanner({ currentLang, originLocation, user
       {/* Planner Parameters Input Controls */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-200 mb-6">
         
-        {/* USER-CONTROLLED REAL-WORLD DESTINATION INPUT WITH AUTOCOMPLETE & PHOTO */}
-        <div className="relative">
+        {/* USER-CONTROLLED CUSTOM DESTINATION INPUT (Requirement 2) */}
+        <div>
           <div className="flex items-center justify-between mb-1.5">
-            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
-              <span>🎯 Destination</span>
-              {destPhoto && (
-                <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-black">
-                  📸 Photo Loaded
-                </span>
-              )}
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              🎯 Destination
             </label>
             <button
               type="button"
@@ -231,52 +163,13 @@ export default function SmartMobilityPlanner({ currentLang, originLocation, user
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Real photo thumbnail preview */}
-            {destPhoto && (
-              <img
-                src={destPhoto}
-                alt={destination}
-                className="w-8 h-8 rounded-lg object-cover border border-teal-300 shrink-0 shadow-xs"
-                onError={(e) => { e.target.style.display = 'none'; }}
-              />
-            )}
-            <div className="relative flex-1">
-              <input
-                type="text"
-                value={destSearch || destination}
-                onChange={(e) => {
-                  setDestSearch(e.target.value);
-                  setDestination(e.target.value);
-                }}
-                placeholder="Search any destination worldwide..."
-                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-teal-500 focus:outline-none"
-              />
-              {searchingDest && (
-                <Loader2 className="absolute right-2.5 top-2.5 h-3.5 w-3.5 text-teal-600 animate-spin" />
-              )}
-            </div>
-          </div>
-
-          {/* Autocomplete Predictions Dropdown */}
-          {destPredictions.length > 0 && (
-            <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl border border-slate-200 shadow-xl z-40 overflow-hidden divide-y divide-slate-100 max-h-52 overflow-y-auto">
-              {destPredictions.map((p) => (
-                <button
-                  key={p.placeId}
-                  type="button"
-                  onClick={() => handleSelectPrediction(p)}
-                  className="w-full text-left p-2.5 hover:bg-teal-50 transition-colors flex items-start gap-2 text-xs"
-                >
-                  <MapPin className="h-3.5 w-3.5 text-rose-500 shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="text-slate-900 block font-bold text-xs">{p.mainText}</strong>
-                    <span className="text-[10px] text-slate-500 line-clamp-1">{p.secondaryText}</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+          <input
+            type="text"
+            value={destination}
+            onChange={(e) => setDestination(e.target.value)}
+            placeholder="Type any place you want to visit..."
+            className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+          />
 
           {/* Stops List (Requirement 3: Multi-stop rides) */}
           {stops.length > 0 && (

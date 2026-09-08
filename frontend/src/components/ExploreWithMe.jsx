@@ -356,22 +356,13 @@ export default function ExploreWithMe({ currentLang, originLocation, onSelectAtt
                 </div>
               </div>
 
-              <div className="p-4 pt-0 space-y-2">
+              <div className="p-4 pt-0">
                 <button
                   onClick={() => onSelectAttraction && onSelectAttraction(place.name)}
                   className="w-full bg-slate-100 hover:bg-teal-600 hover:text-white text-slate-800 font-bold text-xs py-2 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer"
                 >
                   Plan Ride to Here <ArrowRight className="h-3.5 w-3.5" />
                 </button>
-                <a
-                  href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(place.name + ' ' + activeCity)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full text-center text-[10px] font-bold text-teal-700 hover:text-teal-900 hover:underline flex items-center justify-center gap-1 py-0.5"
-                >
-                  <span>🖼️ View Photos on Google Search</span>
-                  <ExternalLink className="h-3 w-3" />
-                </a>
               </div>
 
             </div>

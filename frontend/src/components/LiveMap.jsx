@@ -13,7 +13,6 @@ import {
   findNearestBusStop,
   TRIP_PILOT_MAP_STYLES 
 } from '../services/googleMapsService';
-import { getLocationPhoto } from '../services/locationPhotoService';
 import { translations } from '../translations';
 
 export default function LiveMap({ 
@@ -41,22 +40,6 @@ export default function LiveMap({
   const [routeInfo, setRouteInfo] = useState(null);
   const [showSteps, setShowSteps] = useState(false);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
-  const [destPhoto, setDestPhoto] = useState(null);
-
-  // Dynamic photo lookup for current map destination
-  useEffect(() => {
-    if (!destinationName || destinationName === "Select your destination" || destinationName.trim().length < 2) {
-      setDestPhoto(null);
-      return;
-    }
-    let isMounted = true;
-    getLocationPhoto(destinationName, null, originLocation?.city || "").then((url) => {
-      if (isMounted && url) setDestPhoto(url);
-    });
-    return () => {
-      isMounted = false;
-    };
-  }, [destinationName, originLocation]);
 
   // Initialize Google Map
   useEffect(() => {
@@ -519,21 +502,10 @@ export default function LiveMap({
             {destinationName && destinationName !== "Select your destination" && (
               <>
                 <ArrowRight className="h-3.5 w-3.5 text-rose-400 shrink-0" />
-                <div className="flex items-center gap-2 bg-rose-500/20 text-rose-200 p-1 pr-3 rounded-xl shrink-0 border border-rose-500/35 shadow-sm">
-                  {destPhoto ? (
-                    <img
-                      src={destPhoto}
-                      alt={destinationName}
-                      className="w-6 h-6 rounded-lg object-cover border border-rose-300 shrink-0"
-                      onError={(e) => { e.target.style.display = 'none'; }}
-                    />
-                  ) : (
-                    <span className="text-sm pl-1">🎯</span>
-                  )}
-                  <div>
-                    <span className="font-extrabold text-rose-300 text-[9px] uppercase tracking-wider block">Destination</span>
-                    <span className="text-white font-bold text-xs max-w-[160px] truncate block">{destinationName}</span>
-                  </div>
+                <div className="flex items-center gap-1.5 bg-rose-500/20 text-rose-200 px-3 py-1.5 rounded-xl shrink-0 border border-rose-500/35 shadow-sm">
+                  <span className="text-sm">🎯</span>
+                  <span className="font-extrabold text-rose-300 text-[10px] uppercase tracking-wider">Destination</span>
+                  <span className="text-white font-bold max-w-[160px] truncate">{destinationName}</span>
                 </div>
               </>
             )}

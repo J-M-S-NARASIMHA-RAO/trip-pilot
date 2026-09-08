@@ -82,94 +82,51 @@ export function loadGoogleMaps() {
 }
 
 /**
-/**
- * Google Places API: Autocomplete search for real-world places, landmarks, and addresses globally
+ * Google Places API: Autocomplete search for places and landmarks across India
  */
-export async function searchPlaces(query, centerCoords = { lat: 17.7214, lng: 83.2929 }, options = {}) {
+export async function searchPlaces(query, centerCoords = { lat: 17.7214, lng: 83.2929 }) {
   if (!query || query.trim().length < 2) return [];
-
-  const trimmedQuery = query.trim();
 
   try {
     const google = await loadGoogleMaps();
     const autocompleteService = new google.maps.places.AutocompleteService();
 
-    // Primary request: biased towards user's current coordinates without strict country lockdown
     const request = {
-      input: trimmedQuery,
+      input: query,
+      componentRestrictions: { country: 'in' },
       locationBias: centerCoords ? new google.maps.Circle({
         center: centerCoords,
-        radius: 60000 // 60km bias towards current region
+        radius: 50000 // 50km bias
       }) : undefined
     };
 
-    if (options.restrictCountry) {
-      request.componentRestrictions = { country: options.restrictCountry };
-    }
-
-    const predictions = await new Promise((resolve) => {
-      autocompleteService.getPlacePredictions(request, (results, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && results && results.length > 0) {
-          resolve(results);
-        } else {
-          // If biased search yielded no results, fallback to global unrestricted search
-          autocompleteService.getPlacePredictions({ input: trimmedQuery }, (globalResults, globalStatus) => {
-            if (globalStatus === google.maps.places.PlacesServiceStatus.OK && globalResults) {
-              resolve(globalResults);
-            } else {
-              resolve([]);
-            }
-          });
+    return new Promise((resolve) => {
+      autocompleteService.getPlacePredictions(request, (predictions, status) => {
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions) {
+          resolve([]);
+          return;
         }
+
+        const results = predictions.map((p) => ({
+          placeId: p.place_id,
+          name: p.structured_formatting?.main_text || p.description.split(',')[0],
+          displayName: p.description,
+          mainText: p.structured_formatting?.main_text || p.description,
+          secondaryText: p.structured_formatting?.secondary_text || '',
+          city: extractCityFromDescription(p.description)
+        }));
+
+        resolve(results);
       });
     });
-
-    if (predictions && predictions.length > 0) {
-      return predictions.map((p) => ({
-        placeId: p.place_id,
-        name: p.structured_formatting?.main_text || p.description.split(',')[0],
-        displayName: p.description,
-        mainText: p.structured_formatting?.main_text || p.description,
-        secondaryText: p.structured_formatting?.secondary_text || '',
-        city: extractCityFromDescription(p.description),
-        types: p.types || []
-      }));
-    }
-
-    // Geocoding Fallback if Places autocomplete returned empty
-    const geocoder = new google.maps.Geocoder();
-    const geocodeResults = await new Promise((resolve) => {
-      geocoder.geocode({ address: trimmedQuery }, (res, st) => {
-        if (st === google.maps.GeocoderStatus.OK && res) resolve(res);
-        else resolve([]);
-      });
-    });
-
-    if (geocodeResults.length > 0) {
-      return geocodeResults.slice(0, 5).map((res) => ({
-        placeId: res.place_id,
-        name: res.address_components?.[0]?.long_name || trimmedQuery,
-        displayName: res.formatted_address,
-        mainText: res.address_components?.[0]?.long_name || trimmedQuery,
-        secondaryText: res.formatted_address,
-        city: extractCityFromDescription(res.formatted_address),
-        coords: {
-          lat: res.geometry.location.lat(),
-          lng: res.geometry.location.lng()
-        },
-        types: res.types || []
-      }));
-    }
-
-    return [];
   } catch (err) {
-    console.warn("Places search error:", err);
+    console.warn("Google Places Autocomplete error:", err);
     return [];
   }
 }
 
 /**
- * Google Places API: Fetch lat/lng geometry, Google Photos, rating, and details for a selected Place ID
+ * Google Places API: Fetch lat/lng geometry and details for a selected Place ID
  */
 export async function getPlaceDetails(placeId) {
   if (!placeId) return null;
@@ -183,7 +140,7 @@ export async function getPlaceDetails(placeId) {
       service.getDetails(
         {
           placeId: placeId,
-          fields: ['name', 'geometry', 'formatted_address', 'address_components', 'photos', 'rating', 'user_ratings_total', 'types']
+          fields: ['name', 'geometry', 'formatted_address', 'address_components']
         },
         (place, status) => {
           if (status !== google.maps.places.PlacesServiceStatus.OK || !place) {
@@ -203,25 +160,12 @@ export async function getPlaceDetails(placeId) {
             }
           }
 
-          let photoUrl = null;
-          if (place.photos && place.photos.length > 0) {
-            try {
-              photoUrl = place.photos[0].getUrl({ maxWidth: 800, maxHeight: 600 });
-            } catch (e) {
-              // photo url retrieval error
-            }
-          }
-
           resolve({
             name: place.name,
             address: place.formatted_address,
             lat: place.geometry.location.lat(),
             lng: place.geometry.location.lng(),
-            city: city,
-            photoUrl: photoUrl,
-            rating: place.rating || null,
-            userRatingsTotal: place.user_ratings_total || 0,
-            types: place.types || []
+            city: city
           });
         }
       );
