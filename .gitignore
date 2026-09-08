@@ -26,5 +26,6 @@ backend/.mvn/wrapper/maven-wrapper.jar
 # Logs & Temporary files
 *.log
 *.tmp
+*.zip
 .DS_Store
 Thumbs.db
