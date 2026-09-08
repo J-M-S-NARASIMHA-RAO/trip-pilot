@@ -75,13 +75,16 @@ export default function StayAndFoodExplorer({ currentCity = 'Visakhapatnam' }) {
   };
 
   const updateStayConfig = (stayId, key, value) => {
-    setStayConfigs((prev) => ({
-      ...prev,
-      [stayId]: {
-        ...getStayConfig(stayId),
-        [key]: value
-      }
-    }));
+    setStayConfigs((prev) => {
+      const current = prev[stayId] || { roomType: 'standard', mealPlan: 'none', duration: '24h' };
+      return {
+        ...prev,
+        [stayId]: {
+          ...current,
+          [key]: value
+        }
+      };
+    });
   };
 
   // Calculate dynamic price based on user-chosen money & food options
