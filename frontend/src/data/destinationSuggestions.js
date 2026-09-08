@@ -118,6 +118,54 @@ export const CITY_DESTINATIONS = {
       imageUrl: 'https://images.unsplash.com/photo-1517649763962-0c623266ddc0?w=800'
     },
     {
+      id: 'vskp-gajuwaka',
+      name: 'Gajuwaka Junction',
+      relativeName: 'Gajuwaka Junction, Main Road',
+      category: 'Commercial & Industrial Hub',
+      emoji: '🏬',
+      lat: 17.6908,
+      lng: 83.2104,
+      address: 'Gajuwaka Main Road, Visakhapatnam 530026',
+      rating: 4.4,
+      imageUrl: 'https://images.unsplash.com/photo-1570168007204-dfb528c6958f?w=800'
+    },
+    {
+      id: 'vskp-nad',
+      name: 'NAD Junction / Flyover',
+      relativeName: 'NAD Junction, Gopalapatnam Road',
+      category: 'Transit Intersection',
+      emoji: '🚏',
+      lat: 17.7410,
+      lng: 83.2312,
+      address: "NAD 'X' Junction, Visakhapatnam 530009",
+      rating: 4.3,
+      imageUrl: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=800'
+    },
+    {
+      id: 'vskp-mvp',
+      name: 'MVP Colony / Double Road',
+      relativeName: 'MVP Colony Circle, Sector 1',
+      category: 'Residential & Cafes',
+      emoji: '☕',
+      lat: 17.7394,
+      lng: 83.3328,
+      address: 'MVP Double Road, Visakhapatnam 530017',
+      rating: 4.6,
+      imageUrl: 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=800'
+    },
+    {
+      id: 'vskp-siripuram',
+      name: 'Siripuram Junction',
+      relativeName: 'Siripuram Circle, Dutt Island',
+      category: 'City Centre & Commercial',
+      emoji: '🏢',
+      lat: 17.7227,
+      lng: 83.3152,
+      address: 'Siripuram, Waltair Uplands, Visakhapatnam 530003',
+      rating: 4.5,
+      imageUrl: 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=800'
+    },
+    {
       id: 'vskp-airport',
       name: 'Visakhapatnam Airport (VTZ)',
       relativeName: 'Visakhapatnam International Airport',

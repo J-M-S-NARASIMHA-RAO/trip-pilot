@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import L from 'leaflet';
 import { 
   MapPin, Navigation, Bus, Car, Train, Landmark, AlertTriangle, 
   Key, Check, ShieldAlert, ArrowRight, Layers, Compass, Sparkles, 
@@ -13,6 +14,7 @@ import {
   findNearestBusStop,
   TRIP_PILOT_MAP_STYLES 
 } from '../services/googleMapsService';
+import { searchLocalDestinations } from '../data/destinationSuggestions';
 import { translations } from '../translations';
 
 export default function LiveMap({ 
@@ -28,11 +30,13 @@ export default function LiveMap({
   const mapInstanceRef = useRef(null);
   const directionsRendererRef = useRef(null);
   const routePolylineRef = useRef(null);
+  const routeOuterBorderRef = useRef(null);
   const markersRef = useRef([]);
   const accuracyCircleRef = useRef(null);
   const userMarkerRef = useRef(null);
   const hasInitiallyCenteredRef = useRef(false);
 
+  const hasCustomKey = !!localStorage.getItem('trip_pilot_google_maps_key');
   const [apiKey, setApiKey] = useState(getGoogleMapsApiKey());
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [showKeyModal, setShowKeyModal] = useState(false);
@@ -40,6 +44,20 @@ export default function LiveMap({
   const [routeInfo, setRouteInfo] = useState(null);
   const [showSteps, setShowSteps] = useState(false);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
+
+  // Dual Map Engine Support (Google Maps Platform + OpenStreetMap / CARTO HD)
+  const [useOsmMap, setUseOsmMap] = useState(!hasCustomKey);
+  const leafletContainerRef = useRef(null);
+  const leafletMapRef = useRef(null);
+  const leafletLayersRef = useRef([]);
+
+  // Auto-switch to OpenStreetMap if Google Maps demo key quota or auth limit is reached
+  useEffect(() => {
+    window.gm_authFailure = () => {
+      console.warn("Google Maps quota / auth limit reached. Switching automatically to OpenStreetMap Carto engine.");
+      setUseOsmMap(true);
+    };
+  }, []);
 
   // Initialize Google Map
   useEffect(() => {
@@ -163,15 +181,170 @@ export default function LiveMap({
       routePolylineRef.current.setMap(null);
       routePolylineRef.current = null;
     }
+    if (routeOuterBorderRef.current) {
+      routeOuterBorderRef.current.setMap(null);
+      routeOuterBorderRef.current = null;
+    }
   };
 
   // Center map on user's current live location with high zoom (zoom 17)
   const handleRecenterOnMe = () => {
+    if (useOsmMap && leafletMapRef.current && originLocation?.lat) {
+      leafletMapRef.current.setView([originLocation.lat, originLocation.lng], 17);
+      return;
+    }
     if (!mapInstanceRef.current || !window.google || !originLocation?.lat) return;
     const userPos = new window.google.maps.LatLng(originLocation.lat, originLocation.lng);
     mapInstanceRef.current.panTo(userPos);
     mapInstanceRef.current.setZoom(17);
   };
+
+  // OpenStreetMap / Leaflet Engine Effect
+  useEffect(() => {
+    if (!useOsmMap || !leafletContainerRef.current) return;
+
+    const curLat = originLocation?.lat || 17.7214;
+    const curLng = originLocation?.lng || 83.2929;
+    const curAcc = Math.max(3, Math.round(originLocation?.accuracy || 3));
+
+    if (!leafletMapRef.current) {
+      const map = L.map(leafletContainerRef.current, {
+        zoomControl: true,
+        attributionControl: false
+      }).setView([curLat, curLng], originLocation?.lat ? 16 : 14);
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        subdomains: ['a', 'b', 'c'],
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      }).addTo(map);
+
+      leafletMapRef.current = map;
+    }
+
+    const map = leafletMapRef.current;
+    setTimeout(() => {
+      try { map.invalidateSize(); } catch (e) {}
+    }, 150);
+
+    // Clear previous Leaflet layers
+    leafletLayersRef.current.forEach((layer) => {
+      try { layer.remove(); } catch (e) {}
+    });
+    leafletLayersRef.current = [];
+
+    // 1. User position marker (pulsating GPS icon)
+    const userHtml = `<div style="width: 18px; height: 18px; background: #0284c7; border: 3px solid #ffffff; border-radius: 50%; box-shadow: 0 0 10px rgba(2,132,199,0.8);"></div>`;
+    const userIcon = L.divIcon({ className: '', html: userHtml, iconSize: [18, 18], iconAnchor: [9, 9] });
+    const userMarker = L.marker([curLat, curLng], { icon: userIcon, zIndexOffset: 1000 }).addTo(map);
+    userMarker.bindPopup(`<b>📍 You Are Here (Real-Time GPS)</b><br>Accuracy: ±${curAcc}m`);
+    leafletLayersRef.current.push(userMarker);
+
+    // 2. Accuracy circle
+    const accCircle = L.circle([curLat, curLng], {
+      radius: curAcc,
+      color: '#0284c7',
+      fillColor: '#0284c7',
+      fillOpacity: 0.18,
+      weight: 2
+    }).addTo(map);
+    leafletLayersRef.current.push(accCircle);
+
+    const latLngBounds = L.latLngBounds([[curLat, curLng]]);
+
+    // 3. Render Intermediate Stops
+    const resolvedStops = [];
+    if (stops && stops.length > 0) {
+      stops.forEach((st, idx) => {
+        const sName = typeof st === 'string' ? st : (st?.name || `Stop ${idx + 1}`);
+        let sLat = st?.lat;
+        let sLng = st?.lng;
+
+        if (sLat && sLng) {
+          resolvedStops.push({ name: sName, lat: sLat, lng: sLng });
+          latLngBounds.extend([sLat, sLng]);
+
+          const stopHtml = `<div style="width: 24px; height: 24px; background: #f59e0b; border: 2.5px solid #ffffff; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #0f172a; font-weight: 900; font-size: 11px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);">${idx + 1}</div>`;
+          const stopIcon = L.divIcon({ className: '', html: stopHtml, iconSize: [24, 24], iconAnchor: [12, 12] });
+          const sm = L.marker([sLat, sLng], { icon: stopIcon }).addTo(map);
+          sm.bindPopup(`<b>Stop ${idx + 1}: ${sName}</b>`);
+          leafletLayersRef.current.push(sm);
+        }
+      });
+    }
+
+    // 4. Render Destination Position
+    let destLat = destinationCoords?.lat;
+    let destLng = destinationCoords?.lng;
+
+    if (!destLat || !destLng) {
+      if (destinationName && destinationName !== "Select your destination" && destinationName.trim().length > 1) {
+        const localMatches = searchLocalDestinations(destinationName, originLocation?.city || 'Visakhapatnam');
+        if (localMatches && localMatches.length > 0 && localMatches[0].lat && localMatches[0].lng) {
+          destLat = localMatches[0].lat;
+          destLng = localMatches[0].lng;
+        }
+      }
+    }
+
+    if (destLat && destLng) {
+      latLngBounds.extend([destLat, destLng]);
+
+      const destHtml = `<div style="width: 32px; height: 32px; background: #e11d48; border: 3px solid #ffffff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 3px 8px rgba(0,0,0,0.4);">🎯</div>`;
+      const destIcon = L.divIcon({ className: '', html: destHtml, iconSize: [32, 32], iconAnchor: [16, 16] });
+      const dm = L.marker([destLat, destLng], { icon: destIcon, zIndexOffset: 950 }).addTo(map);
+      dm.bindPopup(`<b>Final Destination: ${destinationName || 'Destination'}</b>`);
+      leafletLayersRef.current.push(dm);
+
+      // 5. Calculate and render Turn-by-Turn Road Route Polyline
+      const travelMode = activeTransport === 'WALK' ? 'WALKING' : (activeTransport === 'BUS' ? 'TRANSIT' : 'DRIVING');
+      calculateRoute(
+        { lat: curLat, lng: curLng },
+        { lat: destLat, lng: destLng },
+        travelMode,
+        resolvedStops.map((s) => ({ lat: s.lat, lng: s.lng }))
+      ).then((route) => {
+        if (!route) return;
+        setRouteInfo(route);
+
+        if (route.pathPoints && route.pathPoints.length > 1) {
+          const polyPoints = route.pathPoints.map((p) =>
+            typeof p.lat === 'function' ? [p.lat(), p.lng()] : [p.lat, p.lng]
+          );
+
+          // Outer navy casing
+          const outerLine = L.polyline(polyPoints, {
+            color: '#1e3a8a',
+            weight: 8,
+            opacity: 0.85
+          }).addTo(map);
+          leafletLayersRef.current.push(outerLine);
+
+          // Inner vibrant electric blue road line
+          const innerLine = L.polyline(polyPoints, {
+            color: '#2563eb',
+            weight: 5,
+            opacity: 1.0
+          }).addTo(map);
+          leafletLayersRef.current.push(innerLine);
+
+          map.fitBounds(outerLine.getBounds(), { padding: [45, 45] });
+        } else {
+          map.fitBounds(latLngBounds, { padding: [45, 45] });
+        }
+      }).catch((err) => {
+        console.warn("Leaflet route error:", err);
+        map.fitBounds(latLngBounds, { padding: [45, 45] });
+      });
+    } else {
+      setRouteInfo(null);
+      if (resolvedStops.length > 0) {
+        map.fitBounds(latLngBounds, { padding: [45, 45] });
+      } else {
+        map.setView([curLat, curLng], 16);
+      }
+    }
+  }, [useOsmMap, originLocation?.lat, originLocation?.lng, destinationName, destinationCoords, stops, activeTransport]);
 
   // Update Route, Markers & Elements
   const updateMapElements = async (google, map) => {
@@ -295,21 +468,27 @@ export default function LiveMap({
     if (destinationCoords?.lat && destinationCoords?.lng) {
       destPos = new google.maps.LatLng(destinationCoords.lat, destinationCoords.lng);
     } else if (destinationName && destinationName !== "Select your destination" && destinationName.trim().length > 1) {
-      const dName = destinationName.toLowerCase();
-      if (dName.includes("beach") || dName.includes("rk")) {
-        destPos = new google.maps.LatLng(17.7142, 83.3235);
-      } else if (dName.includes("kailasagiri")) {
-        destPos = new google.maps.LatLng(17.7492, 83.3421);
-      } else if (dName.includes("submarine")) {
-        destPos = new google.maps.LatLng(17.7169, 83.3323);
+      // Prioritize local curated destinations (e.g. Gajuwaka Junction, RK Beach, etc.)
+      const localMatches = searchLocalDestinations(destinationName, originLocation?.city || 'Visakhapatnam');
+      if (localMatches && localMatches.length > 0 && localMatches[0].lat && localMatches[0].lng) {
+        destPos = new google.maps.LatLng(localMatches[0].lat, localMatches[0].lng);
       } else {
-        try {
-          const geo = await geocodeAddress(`${destinationName}, ${originLocation?.city || 'Visakhapatnam'}`);
-          if (geo?.lat && geo?.lng) {
-            destPos = new google.maps.LatLng(geo.lat, geo.lng);
+        const dName = destinationName.toLowerCase();
+        if (dName.includes("beach") || dName.includes("rk")) {
+          destPos = new google.maps.LatLng(17.7142, 83.3235);
+        } else if (dName.includes("kailasagiri")) {
+          destPos = new google.maps.LatLng(17.7492, 83.3421);
+        } else if (dName.includes("submarine")) {
+          destPos = new google.maps.LatLng(17.7169, 83.3323);
+        } else {
+          try {
+            const geo = await geocodeAddress(`${destinationName}, ${originLocation?.city || 'Visakhapatnam'}`);
+            if (geo?.lat && geo?.lng) {
+              destPos = new google.maps.LatLng(geo.lat, geo.lng);
+            }
+          } catch (e) {
+            console.warn(`Could not geocode destination ${destinationName}:`, e);
           }
-        } catch (e) {
-          console.warn(`Could not geocode destination ${destinationName}:`, e);
         }
       }
     }
@@ -372,25 +551,52 @@ export default function LiveMap({
         const waypoints = resolvedStops.map((s) => s.position);
         const route = await calculateRoute(originPos, destPos, travelMode, waypoints);
         
+        // Reset renderer and polyline references
+        if (directionsRendererRef.current) {
+          directionsRendererRef.current.set('directions', null);
+        }
+        if (routePolylineRef.current) {
+          routePolylineRef.current.setMap(null);
+          routePolylineRef.current = null;
+        }
+        if (routeOuterBorderRef.current) {
+          routeOuterBorderRef.current.setMap(null);
+          routeOuterBorderRef.current = null;
+        }
+
         if (directionsRendererRef.current && route.rawResult) {
           directionsRendererRef.current.setDirections(route.rawResult);
         } else if (route.pathPoints && route.pathPoints.length > 1) {
-          if (routePolylineRef.current) {
-            routePolylineRef.current.setMap(null);
-          }
+          // Signature Google Maps turn-by-turn road navigation polyline:
+          // 1. Dark navy border / casing
+          routeOuterBorderRef.current = new google.maps.Polyline({
+            path: route.pathPoints,
+            geodesic: true,
+            strokeColor: '#1e3a8a',
+            strokeOpacity: 0.85,
+            strokeWeight: 8,
+            zIndex: 50,
+            map: map
+          });
+          // 2. Inner vibrant electric blue road line
           routePolylineRef.current = new google.maps.Polyline({
             path: route.pathPoints,
             geodesic: true,
-            strokeColor: '#0284c7',
-            strokeOpacity: 0.85,
-            strokeWeight: 6,
+            strokeColor: '#2563eb',
+            strokeOpacity: 1.0,
+            strokeWeight: 5,
+            zIndex: 51,
             map: map
           });
         }
         setRouteInfo(route);
 
-        // Auto-fit camera to enclose user, all stops, and destination
-        map.fitBounds(bounds, { top: 60, bottom: 60, left: 60, right: 60 });
+        // Auto-fit camera to enclose the entire road route or bounds
+        if (route.bounds) {
+          map.fitBounds(route.bounds, { top: 60, bottom: 60, left: 60, right: 60 });
+        } else {
+          map.fitBounds(bounds, { top: 60, bottom: 60, left: 60, right: 60 });
+        }
       } catch (routeErr) {
         console.warn("Could not calculate Google Routes:", routeErr);
         map.fitBounds(bounds, { top: 60, bottom: 60, left: 60, right: 60 });
@@ -425,7 +631,7 @@ export default function LiveMap({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] font-bold uppercase tracking-wider text-teal-600 bg-teal-50 px-2.5 py-0.5 rounded-md border border-teal-200">
-              Google Maps Platform
+              {useOsmMap ? "OpenStreetMap Carto HD" : "Google Maps Platform"}
             </span>
             <span className="inline-flex items-center gap-1.5 text-[10px] font-black text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200 shadow-sm">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
@@ -445,6 +651,20 @@ export default function LiveMap({
           >
             <LocateFixed className="h-3.5 w-3.5" />
             <span>Recenter (±{liveAccuracy}m)</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setUseOsmMap(!useOsmMap);
+              setTimeout(() => {
+                if (leafletMapRef.current) leafletMapRef.current.invalidateSize();
+              }, 150);
+            }}
+            className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl border border-slate-200 font-bold transition-all shadow-xs active:scale-95"
+            title="Toggle Map Engine between Google Maps and OpenStreetMap"
+          >
+            <Layers className="h-3.5 w-3.5 text-teal-600" />
+            <span>{useOsmMap ? "Switch to Google Maps" : "Switch to OpenStreetMap"}</span>
           </button>
 
           <button
@@ -561,7 +781,8 @@ export default function LiveMap({
 
       {/* Map Element */}
       <div className="relative rounded-2xl overflow-hidden border border-slate-200 shadow-inner h-[400px] sm:h-[480px] bg-slate-100">
-        <div ref={mapContainerRef} className="w-full h-full z-10" />
+        <div ref={mapContainerRef} className={useOsmMap ? 'hidden' : 'w-full h-full z-10'} />
+        <div ref={leafletContainerRef} className={useOsmMap ? 'w-full h-full z-10' : 'hidden'} />
 
         {/* Live Floating GPS HUD Overlay */}
         <div className="absolute top-3 left-3 z-20 bg-white/95 backdrop-blur-md px-3.5 py-2.5 rounded-2xl border border-slate-200/80 shadow-lg text-xs space-y-1">

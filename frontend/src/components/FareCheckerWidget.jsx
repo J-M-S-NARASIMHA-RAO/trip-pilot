@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { translations } from '../translations';
 import { checkFare, getRapidoAndUberUrls, getLiveTaxiRates } from '../api';
-import { searchPlaces, getPlaceDetails, calculateRoute } from '../services/googleMapsService';
+import { searchPlaces, getPlaceDetails, calculateRoute, geocodeAddress } from '../services/googleMapsService';
 import { saveLocalScamReport } from '../services/safetyService';
 import speechService from '../services/speechService';
 import BusTransitGuide from './BusTransitGuide';
@@ -97,6 +97,48 @@ export default function FareCheckerWidget({
     }
   };
 
+  // Handle typing in destination search field
+  const handleDestinationInputChange = (val) => {
+    setDestSearch(val);
+
+    if (!val || !val.trim()) {
+      handleClearDestination();
+      return;
+    }
+
+    const trimmed = val.trim();
+    // 1. Immediately check if there is an exact or close local match (e.g. "gajuwaka", "beach", "kailasagiri", "airport")
+    const coords = liveLat && liveLng ? { lat: liveLat, lng: liveLng } : null;
+    const localMatches = searchLocalDestinations(trimmed, liveCity, coords);
+
+    // Find best match where name or relativeName contains trimmed or trimmed contains name
+    const match = localMatches.find(m => 
+      m.name.toLowerCase().includes(trimmed.toLowerCase()) || 
+      trimmed.toLowerCase().includes(m.name.toLowerCase()) ||
+      m.relativeName.toLowerCase().includes(trimmed.toLowerCase())
+    );
+
+    if (match) {
+      const matchCoords = { lat: match.lat, lng: match.lng };
+      setDestination(trimmed, matchCoords);
+      setDestinationPhoto(match.imageUrl || null);
+      setDestRating(match.rating || null);
+      setDestAddress(match.address || `${match.name}, ${match.city}, India`);
+      if (onDestinationChange) {
+        onDestinationChange(trimmed, matchCoords);
+      }
+    } else {
+      // Clear previous destination's photo, address, and rating so it never displays an irrelevant place
+      setDestination(trimmed, null);
+      setDestinationPhoto(null);
+      setDestRating(null);
+      setDestAddress("");
+      if (onDestinationChange) {
+        onDestinationChange(trimmed, null);
+      }
+    }
+  };
+
   // Multi-stop ride feature
   const [localStops, setLocalStops] = useState([]);
   const stops = propStops !== undefined ? propStops : localStops;
@@ -156,11 +198,28 @@ export default function FareCheckerWidget({
     }));
     setDestPredictions(formattedLocal);
 
-    // 2. Also query Google Places if online and query >= 2 chars
+    // 2. Also query Google Places & Geocoding if query >= 2 chars
     if (destSearch.trim().length >= 2) {
       const timer = setTimeout(async () => {
         setSearching(true);
         try {
+          // If coordinates are not yet resolved, geocode the typed destination
+          if (!destCoords) {
+            try {
+              const geo = await geocodeAddress(`${destSearch}, ${liveCity}`);
+              if (geo && geo.lat && geo.lng) {
+                const c = { lat: geo.lat, lng: geo.lng };
+                setLocalDestCoords(c);
+                setDestAddress(geo.formattedAddress || `${geo.name}, ${liveCity}, India`);
+                if (onDestinationChange) {
+                  onDestinationChange(destSearch, c);
+                }
+              }
+            } catch (gErr) {
+              console.warn("Geocode background error:", gErr);
+            }
+          }
+
           const results = await searchPlaces(destSearch, {
             lat: liveLat || 17.7214,
             lng: liveLng || 83.2929
@@ -573,12 +632,7 @@ export default function FareCheckerWidget({
               <input
                 type="text"
                 value={destSearch}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setDestSearch(val);
-                  setDestination(val);
-                  if (onDestinationChange) onDestinationChange(val, null);
-                }}
+                onChange={(e) => handleDestinationInputChange(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && destSearch && destSearch.trim()) {
                     e.preventDefault();
@@ -845,7 +899,8 @@ export default function FareCheckerWidget({
                   destinationPhoto ||
                   (popularLiveDestinations.find(d => 
                     destination.toLowerCase().includes(d.name.toLowerCase()) || 
-                    destination.toLowerCase().includes(d.relativeName.toLowerCase())
+                    destination.toLowerCase().includes(d.relativeName.toLowerCase()) ||
+                    d.name.toLowerCase().includes(destination.toLowerCase())
                   )?.imageUrl) ||
                   "https://images.unsplash.com/photo-1477959858617-67f30bc75b82?w=800"
                 }
@@ -883,7 +938,13 @@ export default function FareCheckerWidget({
                 {destination}
               </h4>
               <p className="text-xs text-slate-300 line-clamp-1 mt-0.5">
-                {destAddress || `${destination}, ${originLocation?.city || 'India'}`}
+                {destAddress || 
+                 (popularLiveDestinations.find(d => 
+                    destination.toLowerCase().includes(d.name.toLowerCase()) || 
+                    destination.toLowerCase().includes(d.relativeName.toLowerCase()) ||
+                    d.name.toLowerCase().includes(destination.toLowerCase())
+                  )?.address) || 
+                 `${destination}, ${originLocation?.city || 'India'}`}
               </p>
 
               {/* Quick Links to Google Photos & Google Maps */}

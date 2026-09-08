@@ -355,6 +355,108 @@ export async function reverseGeocode(lat, lng) {
 
 
 /**
+ * Fetches turn-by-turn real road route geometry from OSRM road routing engine.
+ * Returns an array of google.maps.LatLng points tracing actual streets, highways, and curves,
+ * along with distance, duration, and detailed turn-by-turn navigation instructions.
+ */
+export async function getRoadRouteGeometry(origin, destination, waypoints = [], travelMode = 'DRIVING') {
+  try {
+    const getCoords = (p) => {
+      if (!p) return null;
+      if (typeof p.lat === 'function' && typeof p.lng === 'function') {
+        return { lat: p.lat(), lng: p.lng() };
+      }
+      if (p.lat !== undefined && p.lng !== undefined) {
+        return { lat: Number(p.lat), lng: Number(p.lng) };
+      }
+      return null;
+    };
+
+    const o = getCoords(origin);
+    const d = getCoords(destination);
+    if (!o || !d) return null;
+
+    const wpCoords = (waypoints || []).map(getCoords).filter(Boolean);
+    const allPoints = [o, ...wpCoords, d];
+
+    // Format coordinates for OSRM: lon,lat;lon,lat...
+    const coordsStr = allPoints.map((p) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
+    const profile = travelMode === 'WALKING' || travelMode === 'WALK' ? 'walking' : 'driving';
+    const url = `https://router.project-osrm.org/route/v1/${profile}/${coordsStr}?overview=full&geometries=geojson&steps=true`;
+
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+
+    if (data.code === 'Ok' && data.routes && data.routes[0]) {
+      const route = data.routes[0];
+      const google = window.google;
+
+      // Convert [lng, lat] GeoJSON coordinates to google.maps.LatLng points following roads
+      const pathPoints = (route.geometry.coordinates || []).map((c) =>
+        google?.maps?.LatLng ? new google.maps.LatLng(c[1], c[0]) : { lat: c[1], lng: c[0] }
+      );
+
+      const distanceKm = Math.round((route.distance / 1000) * 10) / 10;
+      const durationMinutes = Math.max(1, Math.round(route.duration / 60));
+
+      const steps = [];
+      const legDetails = [];
+      (route.legs || []).forEach((leg, idx) => {
+        const legSteps = [];
+        (leg.steps || []).forEach((st) => {
+          let inst = st.maneuver?.type || 'Proceed';
+          if (st.maneuver?.modifier) inst += ` ${st.maneuver.modifier}`;
+          if (st.name) inst += ` onto ${st.name}`;
+          const stepObj = {
+            instruction: inst,
+            distanceText: st.distance >= 1000 ? `${(st.distance / 1000).toFixed(1)} km` : `${Math.round(st.distance)} m`,
+            durationText: `${Math.max(1, Math.round(st.duration / 60))} min`,
+            distanceMeters: st.distance,
+            durationSeconds: st.duration
+          };
+          legSteps.push(stepObj);
+          steps.push(stepObj);
+        });
+
+        legDetails.push({
+          legIndex: idx,
+          distanceKm: Math.round((leg.distance / 1000) * 10) / 10,
+          distanceText: `${Math.round((leg.distance / 1000) * 10) / 10} km`,
+          durationMinutes: Math.max(1, Math.round(leg.duration / 60)),
+          durationText: `${Math.max(1, Math.round(leg.duration / 60))} mins`,
+          steps: legSteps
+        });
+      });
+
+      let bounds = null;
+      if (google?.maps?.LatLngBounds) {
+        bounds = new google.maps.LatLngBounds();
+        pathPoints.forEach((p) => bounds.extend(p));
+      }
+
+      return {
+        distanceKm,
+        distanceText: `${distanceKm} km`,
+        durationMinutes,
+        durationText: durationMinutes > 60
+          ? `${Math.floor(durationMinutes / 60)} hr ${durationMinutes % 60} mins`
+          : `${durationMinutes} mins`,
+        pathPoints,
+        steps,
+        legs: legDetails,
+        bounds,
+        isRoadGeometry: true,
+        isOptimalShortest: true
+      };
+    }
+  } catch (err) {
+    console.warn("OSRM road route fetch failed:", err);
+  }
+  return null;
+}
+
+/**
  * Google Routes API / DirectionsService: Calculate road route, distance, duration, and turn steps
  */
 export async function calculateRoute(origin, destination, travelMode = 'DRIVING', waypoints = []) {
@@ -406,10 +508,25 @@ export async function calculateRoute(origin, destination, travelMode = 'DRIVING'
     };
 
     return new Promise((resolve, reject) => {
-      directionsService.route(request, (result, status) => {
+      directionsService.route(request, async (result, status) => {
         if (status !== google.maps.DirectionsStatus.OK || !result) {
-          // If Google Directions API request is denied due to project billing restrictions,
-          // perform client-side calculation using google.maps.geometry.spherical
+          // 1. First attempt to fetch high-precision real road geometry (hundreds of turn-by-turn road coordinates)
+          try {
+            const roadRoute = await getRoadRouteGeometry(
+              originParam,
+              destParam,
+              formattedWaypoints.map((w) => w.location),
+              travelMode
+            );
+            if (roadRoute && roadRoute.pathPoints && roadRoute.pathPoints.length > 1) {
+              resolve(roadRoute);
+              return;
+            }
+          } catch (osrmErr) {
+            console.warn("Road route fallback error:", osrmErr);
+          }
+
+          // 2. Secondary fallback if offline / spherical geometry
           if (google.maps.geometry?.spherical) {
             const allCoords = [
               originParam instanceof google.maps.LatLng ? originParam : new google.maps.LatLng(17.7214, 83.2929),
@@ -522,7 +639,8 @@ export async function calculateRoute(origin, destination, travelMode = 'DRIVING'
           steps: allSteps,
           legs: legDetails,
           rawResult: result,
-          bounds: route.bounds
+          bounds: route.bounds,
+          pathPoints: route.overview_path || []
         });
       });
     });

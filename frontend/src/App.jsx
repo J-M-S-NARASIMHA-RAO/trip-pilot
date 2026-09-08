@@ -189,7 +189,7 @@ export default function App() {
               onSelectPlan={(opt) => handleStartTrip(opt, destinationName)}
               onDestinationChange={(name, coords) => {
                 setDestinationName(name);
-                if (coords) setDestinationCoords(coords);
+                setDestinationCoords(coords || null);
               }}
               onScamReported={(reports) => setScamHotspots(reports)}
             />
@@ -239,7 +239,7 @@ export default function App() {
               onSelectPlan={(opt) => handleStartTrip(opt, destinationName)}
               onDestinationChange={(name, coords) => {
                 setDestinationName(name);
-                if (coords) setDestinationCoords(coords);
+                setDestinationCoords(coords || null);
               }}
               onScamReported={(reports) => setScamHotspots(reports)}
             />
